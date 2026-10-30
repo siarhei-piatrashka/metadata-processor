@@ -38,6 +38,14 @@ namespace nanoFramework.Tools.MetadataProcessor.Core.Extensions
                 return "U";
             }
 
+            if (type.IsFunctionPointer)
+            {
+                // stored as I4 (method index), show the target signature for clarity
+                var functionPointer = (FunctionPointerType)type;
+
+                return $"FNPTR {functionPointer.ReturnType.TypeSignatureAsString()}({string.Join(", ", functionPointer.Parameters.Select(p => p.ParameterType.TypeSignatureAsString()))})";
+            }
+
             NanoCLRDataType dataType;
             if (nanoSignaturesTable.PrimitiveTypes.TryGetValue(type.FullName, out dataType))
             {

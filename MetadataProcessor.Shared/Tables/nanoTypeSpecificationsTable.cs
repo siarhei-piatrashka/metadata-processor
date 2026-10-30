@@ -545,9 +545,9 @@ namespace nanoFramework.Tools.MetadataProcessor
                     // Keep them for now
                     continue;
                 }
-                else if (typeReference is ByReferenceType || typeReference is PointerType)
+                else if (typeReference is ByReferenceType || typeReference is PointerType || typeReference is FunctionPointerType)
                 {
-                    // ByRef and Pointer types might be referenced without explicit member refs
+                    // ByRef, Pointer and function pointer types might be referenced without explicit member refs
                     // Keep them for now
                     continue;
                 }

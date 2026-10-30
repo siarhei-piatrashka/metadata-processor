@@ -124,6 +124,11 @@ namespace nanoFramework.Tools.MetadataProcessor
         public NanoClrTable TableIndex => NanoClrTable.TBL_Signatures;
 
         /// <summary>
+        /// Writer of the method signature being generated, if any. Function pointer signatures are only kept in method signatures.
+        /// </summary>
+        private nanoBinaryWriter _methodSignatureWriter;
+
+        /// <summary>
         /// Creates new instance of <see cref="nanoSignaturesTable"/> object.
         /// </summary>
         /// <param name="context">
@@ -238,6 +243,91 @@ namespace nanoFramework.Tools.MetadataProcessor
             }
 
             return sigId;
+        }
+
+        /// <summary>
+        /// Gets existing or creates new signature identifier for a stand-alone method signature (used by <c>calli</c>).
+        /// </summary>
+        /// <param name="callSite">Call site in Mono.Cecil format.</param>
+        public ushort GetOrCreateSignatureId(
+            CallSite callSite)
+        {
+            if (callSite.CallingConvention != MethodCallingConvention.Default)
+            {
+                throw new NotSupportedException(
+                    $"Only managed function pointers are supported. Can't use 'calli' with '{callSite.CallingConvention}' calling convention ({callSite.FullName}).");
+            }
+
+            var sig = GetSignature(RemoveCustomModifiers(callSite));
+            var sigId = GetOrCreateSignatureIdImpl(sig);
+
+            if (_verbose) Console.WriteLine($"calli {callSite.FullName} -> {sig.BufferToHexString()} -> {sigId.ToString("X4")}");
+
+            return sigId;
+        }
+
+        /// <summary>
+        /// Gets existing or creates new signature identifier for the signature of a managed function pointer type.
+        /// </summary>
+        /// <param name="functionPointer">Function pointer type in Mono.Cecil format.</param>
+        public ushort GetOrCreateFunctionPointerSignatureId(
+            FunctionPointerType functionPointer)
+        {
+            EnsureManagedFunctionPointer(functionPointer);
+
+            var sig = GetSignature(RemoveCustomModifiers((IMethodSignature)functionPointer));
+            var sigId = GetOrCreateSignatureIdImpl(sig);
+
+            if (_verbose) Console.WriteLine($"{functionPointer.FullName} -> {sig.BufferToHexString()} -> {sigId.ToString("X4")}");
+
+            return sigId;
+        }
+
+        /// <summary>
+        /// Removes the custom modifiers from a stand-alone method signature.
+        /// </summary>
+        /// <remarks>
+        /// C# emits custom modifiers in function pointer signatures for 'in', 'out' and 'ref readonly' (e.g. <c>modreq(OutAttribute)</c>).
+        /// Those are compile time only information, the method definitions targeted by the function pointers don't have them
+        /// and the modifier types may not even exist in the nanoFramework class libraries.
+        /// </remarks>
+        internal static CallSite RemoveCustomModifiers(
+            IMethodSignature callSite)
+        {
+            var stripped = new CallSite(RemoveCustomModifiers(callSite.ReturnType))
+            {
+                HasThis = callSite.HasThis,
+                ExplicitThis = callSite.ExplicitThis,
+                CallingConvention = callSite.CallingConvention
+            };
+
+            foreach (var parameter in callSite.Parameters)
+            {
+                stripped.Parameters.Add(new ParameterDefinition(RemoveCustomModifiers(parameter.ParameterType)));
+            }
+
+            return stripped;
+        }
+
+        private static TypeReference RemoveCustomModifiers(
+            TypeReference type)
+        {
+            while (type is IModifierType modifier)
+            {
+                type = modifier.ElementType;
+            }
+
+            if (type is ByReferenceType byReference)
+            {
+                var elementType = RemoveCustomModifiers(byReference.ElementType);
+
+                if (elementType != byReference.ElementType)
+                {
+                    return new ByReferenceType(elementType);
+                }
+            }
+
+            return type;
         }
 
         /// <summary>
@@ -364,6 +454,26 @@ namespace nanoFramework.Tools.MetadataProcessor
                 out NanoCLRDataType dataType))
             {
                 writer.WriteByte((byte)dataType);
+                return;
+            }
+
+            if (typeDefinition.IsFunctionPointer)
+            {
+                // managed function pointers are stored as the (32 bits) method index of the target method
+                EnsureManagedFunctionPointer((FunctionPointerType)typeDefinition);
+
+                if (ReferenceEquals(writer, _methodSignatureWriter))
+                {
+                    // in method signatures the function pointer signature is kept so that overloads, overrides and
+                    // interface implementations that differ only by function pointer types can be told apart
+                    ushort functionPointerSigId = GetOrCreateFunctionPointerSignatureId((FunctionPointerType)typeDefinition);
+
+                    writer.WriteByte((byte)NanoCLRDataType.DATATYPE_TYPE_FNPTR);
+                    writer.WriteByte((byte)(functionPointerSigId & 0xFF));
+                    writer.WriteByte((byte)(functionPointerSigId >> 8));
+                }
+
+                writer.WriteByte((byte)NanoCLRDataType.DATATYPE_I4);
                 return;
             }
 
@@ -685,10 +795,20 @@ namespace nanoFramework.Tools.MetadataProcessor
                 // regular parameter count
                 writer.Write((byte)(methodReference.Parameters.Count));
 
-                WriteTypeInfo(methodReference.ReturnType, binaryWriter);
-                foreach (var parameter in methodReference.Parameters)
+                var previousMethodSignatureWriter = _methodSignatureWriter;
+                _methodSignatureWriter = binaryWriter;
+
+                try
                 {
-                    WriteTypeInfo(parameter.ParameterType, binaryWriter);
+                    WriteTypeInfo(methodReference.ReturnType, binaryWriter);
+                    foreach (var parameter in methodReference.Parameters)
+                    {
+                        WriteTypeInfo(parameter.ParameterType, binaryWriter);
+                    }
+                }
+                finally
+                {
+                    _methodSignatureWriter = previousMethodSignatureWriter;
                 }
 
                 return buffer.ToArray();
@@ -1152,6 +1272,15 @@ namespace nanoFramework.Tools.MetadataProcessor
             else
             {
                 WriteDataType(typeReference, writer, true, false, false);
+            }
+        }
+
+        internal static void EnsureManagedFunctionPointer(FunctionPointerType functionPointer)
+        {
+            if (functionPointer.CallingConvention != MethodCallingConvention.Default)
+            {
+                throw new NotSupportedException(
+                    $"Only managed function pointers are supported. Can't use '{functionPointer.FullName}' with '{functionPointer.CallingConvention}' calling convention.");
             }
         }
 

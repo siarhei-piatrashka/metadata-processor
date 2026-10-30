@@ -546,8 +546,11 @@ namespace nanoFramework.Tools.MetadataProcessor.Core
                                 }
                                 else if (instruction.OpCode.OperandType == OperandType.InlineSig)
                                 {
-                                    Debug.Fail("Check this");
-                                    ilDescription.Append($"InlineSig ???? /*{realToken}*/");
+                                    // calli: output the call site signature and its index in the signatures table
+                                    var callSite = (CallSite)instruction.Operand;
+                                    var signatureId = _tablesContext.SignaturesTable.GetOrCreateSignatureId(callSite);
+
+                                    ilDescription.Append($"{callSite.FullName} [{signatureId:X4}] /*{realToken}*/");
                                 }
                             }
 
