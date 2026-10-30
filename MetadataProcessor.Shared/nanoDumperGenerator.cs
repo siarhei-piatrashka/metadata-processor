@@ -339,8 +339,15 @@ namespace nanoFramework.Tools.MetadataProcessor.Core
 
                             if (instruction.Operand != null)
                             {
-                                if (instruction.OpCode.OperandType == OperandType.InlineTok ||
-                                    instruction.OpCode.OperandType == OperandType.InlineSig)
+                                if (instruction.OpCode.OperandType == OperandType.InlineSig)
+                                {
+                                    // output the call site signature
+                                    ilCode.IL += $"{((CallSite)instruction.Operand).FullName}";
+
+                                    // output the token
+                                    ilCode.IL += $" [{((IMetadataTokenProvider)instruction.Operand).MetadataToken.ToInt32():x8}]";
+                                }
+                                else if (instruction.OpCode.OperandType == OperandType.InlineTok)
                                 {
                                     ilCode.IL += $"[{((IMetadataTokenProvider)instruction.Operand).MetadataToken.ToInt32():x8}]";
                                 }

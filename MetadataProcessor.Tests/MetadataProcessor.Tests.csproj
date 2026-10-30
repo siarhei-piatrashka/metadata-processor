@@ -56,6 +56,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Core\Endianness\nanoBinaryWriterTests.cs" />
+    <Compile Include="Core\FunctionPointersTests.cs" />
     <Compile Include="Core\Extensions\ByteArrayExtensionsTests.cs" />
     <Compile Include="Core\Extensions\ParameterDefintionExtensionsTests.cs" />
     <Compile Include="Core\Extensions\TypeDefinitionExtensionsTests.cs" />

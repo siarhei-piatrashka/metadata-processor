@@ -190,6 +190,25 @@ namespace nanoFramework.Tools.MetadataProcessor
                             }
                         }
                         break;
+
+                    case Code.Calli:
+                        {
+                            var callSite = (CallSite)instruction.Operand;
+
+                            // function pointer
+                            --size;
+
+                            if (callSite.HasThis && !callSite.ExplicitThis)
+                            {
+                                --size;
+                            }
+                            size -= callSite.Parameters.Count;
+                            if (callSite.ReturnType.FullName != "System.Void")
+                            {
+                                ++size;
+                            }
+                        }
+                        break;
 	            }
 
 	            size = CorrectStackDepthByPushes(instruction, size);
@@ -381,8 +400,9 @@ namespace nanoFramework.Tools.MetadataProcessor
                     _writer.WriteInt16((short)GetParameterIndex((ParameterDefinition)operand));
 		            break;
 		        case OperandType.InlineSig:
-		            // TODO: implement this properly after finding when such code is generated
-		            //WriteMetadataToken (GetStandAloneSignature ((CallSite) operand));
+                    // calli: operand is the index of the method signature in the signatures table
+                    // (upper 16 bits are reserved and must be zero)
+                    _writer.WriteUInt32(_context.SignaturesTable.GetOrCreateSignatureId((CallSite)operand));
 		            break;
 		        case OperandType.ShortInlineI:
 		            if (opcode == OpCodes.Ldc_I4_S)
