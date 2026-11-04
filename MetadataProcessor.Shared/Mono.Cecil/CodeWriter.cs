@@ -149,6 +149,7 @@ namespace nanoFramework.Tools.MetadataProcessor
 
             var size = 0;
             var maxSize = 0;
+            bool hasCalli = false;
 	        foreach (var instruction in methodBody.Instructions)
 	        {
                 int correctedStackSize;
@@ -190,6 +191,26 @@ namespace nanoFramework.Tools.MetadataProcessor
                             }
                         }
                         break;
+
+                    case Code.Calli:
+                        {
+                            hasCalli = true;
+                            var callSite = (CallSite)instruction.Operand;
+
+                            // function pointer
+                            --size;
+
+                            if (callSite.HasThis && !callSite.ExplicitThis)
+                            {
+                                --size;
+                            }
+                            size -= callSite.Parameters.Count;
+                            if (callSite.ReturnType.FullName != "System.Void")
+                            {
+                                ++size;
+                            }
+                        }
+                        break;
 	            }
 
 	            size = CorrectStackDepthByPushes(instruction, size);
@@ -206,6 +227,12 @@ namespace nanoFramework.Tools.MetadataProcessor
 
 	            maxSize = Math.Max(maxSize, size);
 	        }
+
+            if (hasCalli && maxSize > byte.MaxValue)
+            {
+                throw new NotSupportedException(
+                    $"Method '{methodBody.Method.FullName}' uses calli and requires {maxSize} evaluation-stack slots; nanoFramework supports at most 255.");
+            }
 
 	        return (byte)maxSize;
 	    }
@@ -381,8 +408,9 @@ namespace nanoFramework.Tools.MetadataProcessor
                     _writer.WriteInt16((short)GetParameterIndex((ParameterDefinition)operand));
 		            break;
 		        case OperandType.InlineSig:
-		            // TODO: implement this properly after finding when such code is generated
-		            //WriteMetadataToken (GetStandAloneSignature ((CallSite) operand));
+                    // calli: operand is the index of the method signature in the signatures table
+                    // (upper 16 bits are reserved and must be zero)
+                    _writer.WriteUInt32(_context.SignaturesTable.GetOrCreateSignatureId((CallSite)operand));
 		            break;
 		        case OperandType.ShortInlineI:
 		            if (opcode == OpCodes.Ldc_I4_S)
