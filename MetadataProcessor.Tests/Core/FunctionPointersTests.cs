@@ -243,6 +243,66 @@ namespace nanoFramework.Tools.MetadataProcessor.Tests.Core
             Assert.AreEqual((byte)4, CodeWriter.CalculateStackSize(method.Body));
         }
 
+        private static MethodBody CreateLargeCalliBody(int parameters, int retainedValues, bool hasThis)
+        {
+            TypeSystem typeSystem = Mscorlib.MainModule.TypeSystem;
+            var target = new MethodReference("Target", typeSystem.Void, typeSystem.Object) { HasThis = hasThis };
+            var callSite = new CallSite(typeSystem.Void) { HasThis = hasThis };
+            var method = new MethodDefinition("LargeCalli", MethodAttributes.Static, typeSystem.Void);
+            ILProcessor il = method.Body.GetILProcessor();
+
+            for (int i = 0; i < retainedValues; i++)
+            {
+                il.Emit(OpCodes.Ldc_I4_0);
+            }
+
+            if (hasThis)
+            {
+                il.Emit(OpCodes.Ldnull);
+            }
+
+            for (int i = 0; i < parameters; i++)
+            {
+                target.Parameters.Add(new ParameterDefinition(typeSystem.Int32));
+                callSite.Parameters.Add(new ParameterDefinition(typeSystem.Int32));
+                il.Emit(OpCodes.Ldc_I4_0);
+            }
+
+            il.Emit(OpCodes.Ldftn, target);
+            il.Emit(OpCodes.Calli, callSite);
+
+            for (int i = 0; i < retainedValues; i++)
+            {
+                il.Emit(OpCodes.Pop);
+            }
+
+            il.Emit(OpCodes.Ret);
+            return method.Body;
+        }
+
+        [DataRow(254, 0, false)]
+        [DataRow(253, 1, false)]
+        [DataRow(253, 0, true)]
+        [TestMethod]
+        public void CalculateStackSize_CalliAtLimit(int parameters, int retainedValues, bool hasThis)
+        {
+            Assert.AreEqual(
+                byte.MaxValue,
+                CodeWriter.CalculateStackSize(CreateLargeCalliBody(parameters, retainedValues, hasThis)));
+        }
+
+        [DataRow(255, 0, false)]
+        [DataRow(254, 1, false)]
+        [DataRow(254, 0, true)]
+        [TestMethod]
+        public void CalculateStackSize_CalliOverLimit_Throws(int parameters, int retainedValues, bool hasThis)
+        {
+            NotSupportedException exception = Assert.ThrowsException<NotSupportedException>(
+                () => CodeWriter.CalculateStackSize(CreateLargeCalliBody(parameters, retainedValues, hasThis)));
+
+            StringAssert.Contains(exception.Message, "255");
+        }
+
         private static FunctionPointerType CreateFunctionPointer(TypeReference returnType, params TypeReference[] parameterTypes)
         {
             var functionPointer = new FunctionPointerType { ReturnType = returnType };

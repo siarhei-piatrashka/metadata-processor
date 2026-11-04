@@ -148,6 +148,7 @@ namespace nanoFramework.Tools.MetadataProcessor
 
             var size = 0;
             var maxSize = 0;
+            bool hasCalli = false;
             foreach (var instruction in methodBody.Instructions)
             {
                 int correctedStackSize;
@@ -192,6 +193,7 @@ namespace nanoFramework.Tools.MetadataProcessor
 
                     case Code.Calli:
                     {
+                        hasCalli = true;
                         var callSite = (CallSite)instruction.Operand;
 
                         // function pointer
@@ -223,6 +225,12 @@ namespace nanoFramework.Tools.MetadataProcessor
                 }
 
                 maxSize = Math.Max(maxSize, size);
+            }
+
+            if (hasCalli && maxSize > byte.MaxValue)
+            {
+                throw new NotSupportedException(
+                    $"Method '{methodBody.Method.FullName}' uses calli and requires {maxSize} evaluation-stack slots; nanoFramework supports at most 255.");
             }
 
             return (byte)maxSize;
