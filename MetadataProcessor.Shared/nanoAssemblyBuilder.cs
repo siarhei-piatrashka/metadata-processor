@@ -346,6 +346,79 @@ namespace nanoFramework.Tools.MetadataProcessor
             }
         }
 
+        /// <summary>
+        /// Adds the types used by a method signature (function pointer type or <c>calli</c> call site) to the dependency set.
+        /// </summary>
+        private static void AddMethodSignatureDependencies(
+            IMethodSignature signature,
+            HashSet<MetadataToken> set)
+        {
+            if (signature is FunctionPointerType functionPointer)
+            {
+                nanoSignaturesTable.EnsureManagedFunctionPointer(functionPointer);
+            }
+
+            AddSignatureTypeDependency(signature.ReturnType, set);
+
+            foreach (var p in signature.Parameters)
+            {
+                AddSignatureTypeDependency(p.ParameterType, set);
+            }
+        }
+
+        /// <summary>
+        /// Adds a type to the dependency set. Managed function pointers (e.g. element type of an array of function pointers)
+        /// don't have a metadata token of their own, so the types used by their signature are added instead.
+        /// </summary>
+        private static void AddTypeDependency(
+            TypeReference type,
+            HashSet<MetadataToken> set)
+        {
+            if (type is FunctionPointerType functionPointer)
+            {
+                AddMethodSignatureDependencies(functionPointer, set);
+            }
+            else
+            {
+                set.Add(type.MetadataToken);
+            }
+        }
+
+        private static void AddSignatureTypeDependency(
+            TypeReference type,
+            HashSet<MetadataToken> set)
+        {
+            // unwrap by-ref, arrays and modifiers
+            while (type is TypeSpecification specification &&
+                   !(type is GenericInstanceType) &&
+                   !(type is FunctionPointerType))
+            {
+                type = specification.ElementType;
+            }
+
+            if (type is FunctionPointerType functionPointer)
+            {
+                AddMethodSignatureDependencies(functionPointer, set);
+                return;
+            }
+
+            if (type is GenericParameter ||
+                type.IsPrimitive ||
+                type.FullName == "System.Void" ||
+                type.FullName == "System.String" ||
+                type.FullName == "System.Object")
+            {
+                return;
+            }
+
+            set.Add(type.MetadataToken);
+
+            if (type is GenericInstanceType genericInstance)
+            {
+                set.Add(genericInstance.ElementType.MetadataToken);
+            }
+        }
+
         private HashSet<int> BuildDependencyList(int token)
         {
             HashSet<MetadataToken> tokens = BuildDependencyList(_tablesContext.AssemblyDefinition.MainModule.LookupToken(token).MetadataToken);
@@ -419,7 +492,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                 }
 
                                 // add the metadata token for the element type
-                                set.Add(mr.DeclaringType.GetElementType().MetadataToken);
+                                AddTypeDependency(mr.DeclaringType.GetElementType(), set);
                             }
                             else
                             {
@@ -481,7 +554,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                     mrReturnType.GetElementType().FullName != "System.Object" &&
                                     !mrReturnType.GetElementType().IsPrimitive)
                                 {
-                                    set.Add(mrReturnType.GetElementType().MetadataToken);
+                                    AddTypeDependency(mrReturnType.GetElementType(), set);
                                 }
                             }
                         }
@@ -530,7 +603,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                             if (p.ParameterType is GenericInstanceType)
                             {
                                 set.Add(p.ParameterType.MetadataToken);
-                                set.Add(p.ParameterType.GetElementType().MetadataToken);
+                                AddTypeDependency(p.ParameterType.GetElementType(), set);
                             }
                         }
                     }
@@ -568,7 +641,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                     }
 
                                     // add the metadata token for the element type
-                                    set.Add(fr.DeclaringType.GetElementType().MetadataToken);
+                                    AddTypeDependency(fr.DeclaringType.GetElementType(), set);
                                 }
                                 else
                                 {
@@ -603,7 +676,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                          elementType.FullName != "System.Object" &&
                                         !elementType.IsPrimitive)
                                     {
-                                        set.Add(elementType.MetadataToken);
+                                        AddTypeDependency(elementType, set);
                                     }
                                 }
                             }
@@ -715,14 +788,18 @@ namespace nanoFramework.Tools.MetadataProcessor
                 case TokenType.Field:
                     FieldDefinition fd = _tablesContext.FieldsTable.Items.FirstOrDefault(i => i.MetadataToken == token);
 
-                    if (fd is TypeReference)
+                    if (fd.FieldType.IsFunctionPointer)
+                    {
+                        AddMethodSignatureDependencies((FunctionPointerType)fd.FieldType, set);
+                    }
+                    else if (fd is TypeReference)
                     {
                         set.Add(fd.MetadataToken);
                     }
                     else if (fd.FieldType is GenericInstanceType)
                     {
                         set.Add(fd.FieldType.MetadataToken);
-                        set.Add(fd.FieldType.GetElementType().MetadataToken);
+                        AddTypeDependency(fd.FieldType.GetElementType(), set);
                     }
                     else if (fd.FieldType.IsValueType &&
                              !fd.FieldType.IsPrimitive)
@@ -742,7 +819,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                 fd.FieldType.GetElementType().FullName != "System.Object" &&
                                 !fd.FieldType.GetElementType().IsPrimitive)
                             {
-                                set.Add(fd.FieldType.GetElementType().MetadataToken);
+                                AddTypeDependency(fd.FieldType.GetElementType(), set);
                             }
                         }
                     }
@@ -806,7 +883,11 @@ namespace nanoFramework.Tools.MetadataProcessor
                     }
 
                     // Now process the actual return type
-                    if (mdReturnType.IsValueType
+                    if (mdReturnType.IsFunctionPointer)
+                    {
+                        AddMethodSignatureDependencies((FunctionPointerType)mdReturnType, set);
+                    }
+                    else if (mdReturnType.IsValueType
                   && !mdReturnType.IsPrimitive)
                     {
                         set.Add(mdReturnType.MetadataToken);
@@ -824,7 +905,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                            mdReturnType.GetElementType().FullName != "System.Object" &&
                            !mdReturnType.GetElementType().IsPrimitive)
                             {
-                                set.Add(mdReturnType.GetElementType().MetadataToken);
+                                AddTypeDependency(mdReturnType.GetElementType(), set);
                             }
                         }
                     }
@@ -860,7 +941,11 @@ namespace nanoFramework.Tools.MetadataProcessor
                             parameterType = p.ParameterType;
                         }
 
-                        if (parameterType.IsArray)
+                        if (parameterType.IsFunctionPointer)
+                        {
+                            AddMethodSignatureDependencies((FunctionPointerType)parameterType, set);
+                        }
+                        else if (parameterType.IsArray)
                         {
                             if (parameterType.DeclaringType != null)
                             {
@@ -873,7 +958,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                     && parameterType.GetElementType().FullName != "System.Object"
                                     && !parameterType.GetElementType().IsPrimitive)
                                 {
-                                    set.Add(parameterType.GetElementType().MetadataToken);
+                                    AddTypeDependency(parameterType.GetElementType(), set);
                                 }
                             }
                         }
@@ -893,7 +978,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                             }
 
                             // add the metadata token for the element type
-                            set.Add(parameterType.GetElementType().MetadataToken);
+                            AddTypeDependency(parameterType.GetElementType(), set);
                         }
                         else if (parameterType.IsValueType &&
                                  !parameterType.IsPrimitive)
@@ -933,7 +1018,11 @@ namespace nanoFramework.Tools.MetadataProcessor
                         // variables
                         foreach (VariableDefinition v in md.Body.Variables)
                         {
-                            if (v.VariableType.DeclaringType != null)
+                            if (v.VariableType.IsFunctionPointer)
+                            {
+                                AddMethodSignatureDependencies((FunctionPointerType)v.VariableType, set);
+                            }
+                            else if (v.VariableType.DeclaringType != null)
                             {
                                 TypeDefinition resolvedType = v.VariableType.Resolve();
 
@@ -957,7 +1046,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                     && v.VariableType.GetElementType().FullName != "System.Object"
                                     && !v.VariableType.GetElementType().IsPrimitive)
                                 {
-                                    set.Add(v.VariableType.GetElementType().MetadataToken);
+                                    AddTypeDependency(v.VariableType.GetElementType(), set);
                                 }
                             }
                             else if (v.VariableType is GenericInstanceType)
@@ -972,7 +1061,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                 }
 
                                 // add the metadata token for the element type
-                                set.Add(v.VariableType.GetElementType().MetadataToken);
+                                AddTypeDependency(v.VariableType.GetElementType(), set);
                             }
                             else if (v.VariableType.IsValueType
                                      && !v.VariableType.IsPrimitive)
@@ -1013,12 +1102,16 @@ namespace nanoFramework.Tools.MetadataProcessor
                                     set.Add(new MetadataToken(TokenType.TypeSpec, typeSpecId));
 
                                     // add the metadata token for the element type
-                                    set.Add(ts.GetElementType().MetadataToken);
+                                    AddTypeDependency(ts.GetElementType(), set);
                                 }
 
                                 // capture the *return‐type* of the instantiation (e.g. T[] for Array.Empty<T>())
                                 TypeReference returnType = genericInstanceMethod.ReturnType;
-                                if (returnType is ArrayType arrayType)
+                                if (returnType.GetElementType() is FunctionPointerType functionPointerReturn)
+                                {
+                                    AddMethodSignatureDependencies(functionPointerReturn, set);
+                                }
+                                else if (returnType is ArrayType arrayType)
                                 {
                                     // Cecil.Mono has a bug providing TypeSpecs Metadata tokens generic parameters variables, so we need to check against our internal table and build one from it
                                     if (_tablesContext.TypeSpecificationsTable
@@ -1032,13 +1125,13 @@ namespace nanoFramework.Tools.MetadataProcessor
                                         Debug.Fail($"Missing Array TypeSpec for {arrayType}");
                                     }
 
-                                    set.Add(arrayType.GetElementType().MetadataToken);
+                                    AddTypeDependency(arrayType.GetElementType(), set);
 
                                     // still pin the element T itself
                                     TypeReference elementType = arrayType.GetElementType();
                                     if (elementType.FullName != "System.Void" && !elementType.IsPrimitive)
                                     {
-                                        set.Add(elementType.MetadataToken);
+                                        AddTypeDependency(elementType, set);
                                     }
                                 }
                                 else if (returnType is GenericInstanceType genericInstanceType)
@@ -1065,7 +1158,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                             // add "fabricated" token for TypeSpec using the referenceId as RID
                                             set.Add(new MetadataToken(TokenType.TypeSpec, atSpecId));
 
-                                            set.Add(at.GetElementType().MetadataToken);
+                                            AddTypeDependency(at.GetElementType(), set);
                                         }
                                         else
                                         {
@@ -1077,7 +1170,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                         TypeReference elementType = at.GetElementType();
                                         if (elementType.FullName != "System.Void" && !elementType.IsPrimitive)
                                         {
-                                            set.Add(elementType.MetadataToken);
+                                            AddTypeDependency(elementType, set);
                                         }
                                     }
                                     else if (parameterType is GenericInstanceType genericInstanceType)
@@ -1110,14 +1203,18 @@ namespace nanoFramework.Tools.MetadataProcessor
 
                                 // now capture its return‐type just like above
                                 TypeReference returnType = (i.Operand as MethodReference).ReturnType;
-                                if (returnType is ArrayType arrayType)
+                                if (returnType.GetElementType() is FunctionPointerType functionPointerReturn)
+                                {
+                                    AddMethodSignatureDependencies(functionPointerReturn, set);
+                                }
+                                else if (returnType is ArrayType arrayType)
                                 {
                                     if (_tablesContext.TypeSpecificationsTable.TryGetTypeReferenceId(
                                         arrayType,
                                         out ushort arraySpecId))
                                     {
                                         set.Add(new MetadataToken(TokenType.TypeSpec, arraySpecId));
-                                        set.Add(arrayType.GetElementType().MetadataToken);
+                                        AddTypeDependency(arrayType.GetElementType(), set);
                                     }
                                     else
                                     {
@@ -1127,7 +1224,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                     TypeReference elementType = arrayType.ElementType;
                                     if (elementType.FullName != "System.Void" && !elementType.IsPrimitive)
                                     {
-                                        set.Add(elementType.MetadataToken);
+                                        AddTypeDependency(elementType, set);
                                     }
                                 }
                                 else if (returnType is GenericInstanceType gitRt)
@@ -1193,6 +1290,11 @@ namespace nanoFramework.Tools.MetadataProcessor
                                 // done here
                                 continue;
                             }
+                            else if (i.Operand is CallSite callSite)
+                            {
+                                // calli: types used in the stand-alone method signature
+                                AddMethodSignatureDependencies(callSite, set);
+                            }
 
                             else if (i.Operand is FieldReference
                                 || i.Operand is TypeDefinition
@@ -1225,7 +1327,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                     }
 
                                     // add the metadata token for the element type
-                                    set.Add(opType.GetElementType().MetadataToken);
+                                    AddTypeDependency(opType.GetElementType(), set);
                                 }
                                 else
                                 {
@@ -1306,7 +1408,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                         {
                             // add "fabricated" token for TypeSpec using the referenceId as RID
                             set.Add(new MetadataToken(TokenType.TypeSpec, typeSpecRefId));
-                            set.Add(ts.GetElementType().MetadataToken);
+                            AddTypeDependency(ts.GetElementType(), set);
                         }
                         else
                         {
@@ -1315,7 +1417,11 @@ namespace nanoFramework.Tools.MetadataProcessor
 
                         // pin the RETURN type of this instantiation
                         TypeReference ret = ms.ReturnType;
-                        if (ret is ArrayType arr)
+                        if (ret.GetElementType() is FunctionPointerType functionPointerReturn)
+                        {
+                            AddMethodSignatureDependencies(functionPointerReturn, set);
+                        }
+                        else if (ret is ArrayType arr)
                         {
                             if (_tablesContext.TypeSpecificationsTable.TryGetTypeReferenceId(
                                 arr.GetElementType(),
@@ -1329,7 +1435,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                 Debug.Fail($"Missing Array TypeSpec for {arr}");
                             }
 
-                            set.Add(arr.GetElementType().MetadataToken);
+                            AddTypeDependency(arr.GetElementType(), set);
                         }
                         else if (ret is GenericInstanceType genericInstanceType)
                         {
@@ -1359,7 +1465,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                                     set.Add(new MetadataToken(TokenType.TypeSpec, apRid));
                                 }
 
-                                set.Add(ap.GetElementType().MetadataToken);
+                                AddTypeDependency(ap.GetElementType(), set);
                             }
                             else if (parameterType is GenericInstanceType genericInstanceType)
                             {
@@ -1719,7 +1825,7 @@ namespace nanoFramework.Tools.MetadataProcessor
                     Debug.Fail($"Missing TypeSpec for {ts}");
                 }
 
-                set.Add(ts.GetElementType().MetadataToken);
+                AddTypeDependency(ts.GetElementType(), set);
             }
             else if (t.MetadataType == MetadataType.Class
                      || (t.IsValueType && !t.IsPrimitive))

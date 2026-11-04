@@ -134,5 +134,9 @@ namespace nanoFramework.Tools.MetadataProcessor
         DATATYPE_TYPE_R4_HFA = 0x06 | DATATYPE_TYPE_MODIFIER, // used only internally for R4 HFA types
         DATATYPE_TYPE_R8_HFA = 0x07 | DATATYPE_TYPE_MODIFIER, // used only internally for R8 HFA types
 
+        // managed function pointer, used only in method signatures: followed by the index (2 bytes, little endian) of the
+        // function pointer signature and by the type used to store the function pointer (DATATYPE_I4)
+        DATATYPE_TYPE_FNPTR = 0x02 | DATATYPE_TYPE_MODIFIER,
+
     }
 }
