@@ -1107,7 +1107,11 @@ namespace nanoFramework.Tools.MetadataProcessor
 
                                 // capture the *return‐type* of the instantiation (e.g. T[] for Array.Empty<T>())
                                 TypeReference returnType = genericInstanceMethod.ReturnType;
-                                if (returnType is ArrayType arrayType)
+                                if (returnType.GetElementType() is FunctionPointerType functionPointerReturn)
+                                {
+                                    AddMethodSignatureDependencies(functionPointerReturn, set);
+                                }
+                                else if (returnType is ArrayType arrayType)
                                 {
                                     // Cecil.Mono has a bug providing TypeSpecs Metadata tokens generic parameters variables, so we need to check against our internal table and build one from it
                                     if (_tablesContext.TypeSpecificationsTable
@@ -1199,7 +1203,11 @@ namespace nanoFramework.Tools.MetadataProcessor
 
                                 // now capture its return‐type just like above
                                 TypeReference returnType = (i.Operand as MethodReference).ReturnType;
-                                if (returnType is ArrayType arrayType)
+                                if (returnType.GetElementType() is FunctionPointerType functionPointerReturn)
+                                {
+                                    AddMethodSignatureDependencies(functionPointerReturn, set);
+                                }
+                                else if (returnType is ArrayType arrayType)
                                 {
                                     if (_tablesContext.TypeSpecificationsTable.TryGetTypeReferenceId(
                                         arrayType,
@@ -1409,7 +1417,11 @@ namespace nanoFramework.Tools.MetadataProcessor
 
                         // pin the RETURN type of this instantiation
                         TypeReference ret = ms.ReturnType;
-                        if (ret is ArrayType arr)
+                        if (ret.GetElementType() is FunctionPointerType functionPointerReturn)
+                        {
+                            AddMethodSignatureDependencies(functionPointerReturn, set);
+                        }
+                        else if (ret is ArrayType arr)
                         {
                             if (_tablesContext.TypeSpecificationsTable.TryGetTypeReferenceId(
                                 arr.GetElementType(),

@@ -461,5 +461,85 @@ namespace nanoFramework.Tools.MetadataProcessor.Tests.Core
             Assert.ThrowsException<NotSupportedException>(
                 () => table.GetOrCreateSignatureId(CreateMethod(Mscorlib.MainModule.TypeSystem.Void, CreateFunctionPointer(callingConvention))));
         }
+
+        [DataRow(0)]
+        [DataRow(1)]
+        [DataRow(2)]
+        [TestMethod]
+        public void Minimize_GenericFunctionPointerReturn_Completes(int arrayLevels)
+        {
+            using (var assembly = AssemblyDefinition.CreateAssembly(
+                new AssemblyNameDefinition("GenericPointerReturn", new Version(1, 0)),
+                "GenericPointerReturn",
+                ModuleKind.Console))
+            {
+                ModuleDefinition module = assembly.MainModule;
+                var program = new TypeDefinition(
+                    "Tests",
+                    "Program",
+                    TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed,
+                    module.ImportReference(Mscorlib.MainModule.TypeSystem.Object));
+                module.Types.Add(program);
+
+                var factory = new MethodDefinition("Make", MethodAttributes.Public | MethodAttributes.Static, module.TypeSystem.Void);
+                var parameter = new GenericParameter("T", factory);
+                factory.GenericParameters.Add(parameter);
+                TypeReference returnType = CreateFunctionPointer(parameter, parameter);
+                for (int i = 0; i < arrayLevels; i++)
+                {
+                    returnType = new ArrayType(returnType);
+                }
+
+                factory.ReturnType = returnType;
+                program.Methods.Add(factory);
+                ILProcessor factoryIl = factory.Body.GetILProcessor();
+                if (arrayLevels == 0)
+                {
+                    factoryIl.Emit(OpCodes.Ldc_I4_0);
+                    factoryIl.Emit(OpCodes.Conv_U);
+                }
+                else
+                {
+                    factoryIl.Emit(OpCodes.Ldnull);
+                }
+                factoryIl.Emit(OpCodes.Ret);
+
+                var main = new MethodDefinition("Main", MethodAttributes.Public | MethodAttributes.Static, module.TypeSystem.Void);
+                program.Methods.Add(main);
+                module.EntryPoint = main;
+                var closedFactory = new GenericInstanceMethod(factory);
+                closedFactory.GenericArguments.Add(module.TypeSystem.Int32);
+                ILProcessor mainIl = main.Body.GetILProcessor();
+                mainIl.Emit(OpCodes.Ldftn, closedFactory);
+                mainIl.Emit(OpCodes.Pop);
+                mainIl.Emit(OpCodes.Call, closedFactory);
+                mainIl.Emit(OpCodes.Pop);
+                mainIl.Emit(OpCodes.Ret);
+
+                using (var serialized = new MemoryStream())
+                {
+                    assembly.Write(serialized);
+                    serialized.Position = 0;
+                    using (var loaded = AssemblyDefinition.ReadAssembly(serialized))
+                    {
+                        var builder = new nanoAssemblyBuilder(loaded, false);
+                        using (var output = new MemoryStream())
+                        using (var writer = new BinaryWriter(output))
+                        {
+                            builder.Write(nanoBinaryWriter.CreateLittleEndianBinaryWriter(writer));
+                        }
+
+                        builder.Minimize();
+
+                        using (var output = new MemoryStream())
+                        using (var writer = new BinaryWriter(output))
+                        {
+                            builder.Write(nanoBinaryWriter.CreateLittleEndianBinaryWriter(writer));
+                            Assert.IsTrue(output.Length > 0);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
